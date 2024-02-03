@@ -42,6 +42,7 @@ def user_check(database, column_name, table_name):
 
 
 
+
 # Initialize bot and dispatcher
 bot = Bot(token="6595205342:AAFWRT5j0_7deBqRgjF2fZIQilDsdpFGji8")
 dp = Dispatcher(bot, storage=MemoryStorage())
@@ -108,17 +109,26 @@ async def pass_log(message: types.Message, state: FSMContext):
 
     conn = sqlite3.connect("data.db")
     cursor = conn.cursor()
-    query = "SELECT password FROM users WHERE uid = ?"
+    query = "SELECT username, password FROM users WHERE uid = ?"
     cursor.execute(query, (user_id,))
     row = cursor.fetchone()  # Fetch only one row as we filter by user ID
     conn.close()
 
-    if row and password_entered == row[0]:
-        await message.answer("Welcome")
+    if row and password_entered == row[1]:
+        buttons = [[KeyboardButton(text="Catalog📔"), KeyboardButton(text="My Wallet👝")]]
+        keyboard = ReplyKeyboardMarkup(resize_keyboard=True, keyboard=buttons)
+        await message.answer(f"Welcome {row[0]} What are you going to buy today?", reply_markup=keyboard)
+
         await state.finish()
     else:
         await message.answer("Invalid password")
 
+
+@dp.message_handler(lambda message: message.text == "Catalog📔", state="*")
+async def Catalog(message: types.Message):
+    buttons = [[KeyboardButton(text="Toys"), KeyboardButton(text="Foods"), KeyboardButton(text="Phones")]]
+    keyboard = ReplyKeyboardMarkup(resize_keyboard=True, keyboard=buttons)
+    await message.answer("Choose one of the catalog types", reply_markup=keyboard)
 
 
 
