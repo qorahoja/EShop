@@ -64,17 +64,6 @@ async def start(message: types.Message, state: FSMContext):
         await Form.waiting_pass_for_log.set()
 
 
-@dp.message_handler(Command("admin"), state="*")
-async def admin_pass(message: types.Message, state: FSMContext):
-    user_id = message.from_user.id
-    conn = sqlite3.connect("data.db")
-    cursor = conn.cursor()
-    query = "SELECT username, password FROM admins WHERE uid = ?"
-    cursor.execute(query, (user_id,))
-    row = cursor.fetchone()  # Fetch only one row as we filter by user ID
-    conn.close()
-
-
 
 @dp.message_handler(state=Form.waiting_name_for_reg)
 async def reg_name(message: types.Message, state: FSMContext):
