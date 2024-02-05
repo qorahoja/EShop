@@ -7,6 +7,7 @@ from data import Database
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.types import KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
+import random
 # States class definition
 class Form(StatesGroup):
     waiting_name_for_reg = State()
@@ -23,6 +24,12 @@ class Form(StatesGroup):
     user_select_product = State()
     new_password = State()
     wait_order = State()
+    deliver_name = State()
+    deliver_phone = State()
+    deliver_car = State()
+    deliver_reg_pass = State()
+    deliver_log = State()
+    
 
 
 
@@ -66,6 +73,7 @@ dp = Dispatcher(bot, storage=MemoryStorage())
 user_data = {}
 product = {}
 user_product = {}
+deliver_data = {}
 
 # Define a command handler
 @dp.message_handler(Command("start"), state="*")
@@ -93,6 +101,90 @@ async def admin(message: types.Message, state: FSMContext):
     else:
         await message.answer("Dear admin, please enter your password")
         await Form.waiting_pass_admin.set()
+
+
+@dp.message_handler(commands=['deliver'], state="*")
+async def deliver_reg(message: types.Message, state: FSMContext):
+    del_id = message.from_user.id
+
+    conn = sqlite3.connect('data.db')
+    cursor = conn.cursor()
+
+    deliver_exists_query = "SELECT user_id FROM deliverables WHERE user_id = ?"
+    cursor.execute(deliver_exists_query, (del_id,))
+    row = cursor.fetchone()
+
+    if row:
+        # Deliverer already exists, prompt for password
+        await message.answer("Hello Mr please enter your password")
+        await Form.deliver_log.set()
+    else:
+        # New deliverer, prompt for name
+        await message.answer("Hello new deliver, can you tell me your name")
+        await Form.deliver_name.set()
+
+    conn.close()
+
+
+
+@dp.message_handler(state=Form.deliver_name)
+async def deliver_name(message: types.Message, state: FSMContext):
+    deliver_data["deliver_name"] = message.text
+
+    await message.answer(f"Ok nice too meet you {message.text} Please enter your strong password")
+    await Form.deliver_reg_pass.set()
+
+
+@dp.message_handler(state=Form.deliver_reg_pass)
+async def deliver_pass(message: types.Message, state: FSMContext):
+    deliver_data['deliver_pass'] = message.text
+    await message.answer(f"Ok and then enter your car name like Matiz e.x")
+
+    await Form.deliver_car.set()
+ 
+
+@dp.message_handler(state=Form.deliver_car)
+async def deliver_car(message: types.Message, state: FSMContext):
+    deliver_data["deliver_car"] = message.text
+    keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
+    button = KeyboardButton("Share Contact", request_contact=True)
+    keyboard.add(button)
+
+    await message.answer("You have a very nice car. The last step can you give me your number please", reply_markup=keyboard)
+    await state.finish()
+
+
+@dp.message_handler(content_types=types.ContentType.CONTACT)
+async def handle_contact(message: types.Message):
+    user_id = message.from_user.id
+    contact = message.contact["phone_number"]
+    
+    deliver_n = deliver_data["deliver_name"]
+    deliver_c = deliver_data["deliver_car"]
+    deliver_p = deliver_data['deliver_pass']
+
+    conn = sqlite3.connect('data.db')
+    cursor = conn.cursor()
+
+    add_delivry_data = "INSERT INTO deliverables (user_id, deliver_name, deliver_car, deliver_number, deliver_pass, deliver_status) VALUES (?, ?, ?, ?, ?, ?)"
+    values = (user_id, deliver_n, deliver_c, contact, deliver_p, "empty")
+    cursor.execute(add_delivry_data, values)
+
+    conn.commit()
+    conn.close()
+
+    await message.answer("Thank you new deliver i save all information about you if new order registred i will tell you")
+
+
+
+
+
+
+    
+
+
+
+
 
 
 
@@ -621,8 +713,8 @@ async def inline_button_pressed(callback_query: types.CallbackQuery):
             new_wallet_amount = wallet_amount - product_price
             update_query = "UPDATE wallet SET how_much = ? WHERE user_id = ?"
             cursor.execute(update_query, (new_wallet_amount, user_id))
-            order_archiving = "UPDATE orders SET order_status = ? WHERE user_id = ?"
-            cursor.execute(order_archiving, ("Paid", user_id))
+            order_archiving = "UPDATE orders SET order_status = ? WHERE user_id = ? AND order_name = ?"
+            cursor.execute(order_archiving, ("Paid", user_id, name,))
             conn.commit()
             button = [[KeyboardButton(text="Delivery🛫"), KeyboardButton(text="Take away🫴")]]
             keyboard = ReplyKeyboardMarkup(resize_keyboard=True, keyboard=button)
@@ -641,7 +733,32 @@ async def inline_button_pressed(callback_query: types.CallbackQuery):
 
 @dp.message_handler(lambda message: message.text == "Delivery🛫")
 async def delivery(message: types.Message, state: FSMContext):
+    conn = sqlite3.connect('data.db')
+    cursor = conn.cursor()
     
+    delivers = []
+
+    deliver = "SELECT deliver_name, deliver_car, deliver_number, user_id FROM deliverables WHERE  deliver_status = ?"
+
+    cursor.execute(deliver, ("empty",))
+
+    deliver_row = cursor.fetchall()
+
+    for row in deliver_row:
+        delivers.append(row)
+
+    if delivers:
+        random_deliver = random.choice(delivers)
+        await message.answer(f"The supplier is on the way\n\nName: {random_deliver[0]}\n\nPhone Number: {random_deliver[2]}\n\nCar: {random_deliver[1]}")
+        update_status = "UPDATE deliverables SET deliver_status = ? WHERE deliver_name = ?"
+        cursor.execute(update_status, ("Busy", random_deliver[0],))
+        await bot.send_message(random_deliver[3], "Go to work")
+    else:
+        print("No available deliveries")
+
+    conn.close()  # Close the database connection when done
+
+        
 
 @dp.message_handler(lambda message: message.text == "Take away🫴")
 async def take_away(message: types.Message, state: FSMContext):

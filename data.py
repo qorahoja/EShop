@@ -46,6 +46,16 @@ class Database:
                             how_much TEXT
                             )''')
         
+        self.cursor.execute('''CREATE TABLE IF NOT EXISTS deliverables(
+                            user_id INTEGER PRIMARY KEY,
+                            deliver_name TEXT,
+                            deliver_car TEXT,
+                            deliver_number TEXT,
+                            deliver_pass TEXT,
+                            deliver_status TEXT
+
+                            )''')
+        
 
         self.conn.commit()
 
