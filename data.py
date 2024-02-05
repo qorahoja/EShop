@@ -35,7 +35,7 @@ class Database:
                             )''')
         
         self.cursor.execute('''CREATE TABLE IF NOT EXISTS orders(
-                            user_id INTEGER PRIMARY KEY,
+                            user_id INTEGER,
                             order_name TEXT,
                             order_description TEXT,
                             order_price TEXT    
