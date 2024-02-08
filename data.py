@@ -38,7 +38,9 @@ class Database:
                             user_id INTEGER,
                             order_name TEXT,
                             order_description TEXT,
-                            order_price TEXT    
+                            order_price TEXT,
+                            delivry_status TEXT,
+                            deliver_id TEXT 
                             )''')
 
         self.cursor.execute('''CREATE TABLE IF NOT EXISTS wallet(

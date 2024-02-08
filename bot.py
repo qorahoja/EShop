@@ -8,6 +8,9 @@ from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.types import KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
 import random
+import asyncio
+import matplotlib.pyplot as plt
+
 # States class definition
 class Form(StatesGroup):
     waiting_name_for_reg = State()
@@ -29,6 +32,9 @@ class Form(StatesGroup):
     deliver_car = State()
     deliver_reg_pass = State()
     deliver_log = State()
+    deliver_busy = State()
+    deliver_password = State()
+    statistic_ = State()
     
 
 
@@ -64,6 +70,25 @@ def admin_check(database, column_name, table_name):
     return [row[0] for row in rows]
 
 
+import random
+
+def generate_unique_numbers(num_of_numbers):
+    # Generate a list of all possible 6-digit numbers
+    all_numbers = [str(i).zfill(6) for i in range(1000000)]
+
+    # Shuffle the list to get a random order
+    random.shuffle(all_numbers)
+
+    # Take the required number of unique random 6-digit numbers
+    unique_numbers = random.sample(all_numbers, num_of_numbers)
+
+    return unique_numbers
+
+
+
+
+
+
 
 
 # Initialize bot and dispatcher
@@ -74,6 +99,8 @@ user_data = {}
 product = {}
 user_product = {}
 deliver_data = {}
+
+deliver = False
 
 # Define a command handler
 @dp.message_handler(Command("start"), state="*")
@@ -110,7 +137,7 @@ async def deliver_reg(message: types.Message, state: FSMContext):
     conn = sqlite3.connect('data.db')
     cursor = conn.cursor()
 
-    deliver_exists_query = "SELECT user_id FROM deliverables WHERE user_id = ?"
+    deliver_exists_query = "SELECT deliver_id FROM deliverables WHERE deliver_id = ?"
     cursor.execute(deliver_exists_query, (del_id,))
     row = cursor.fetchone()
 
@@ -124,6 +151,57 @@ async def deliver_reg(message: types.Message, state: FSMContext):
         await Form.deliver_name.set()
 
     conn.close()
+
+
+@dp.message_handler(commands=['deliver_on'])
+async def deliver_on(message: types.Message):
+    global deliver
+    admin_ids = admin_check('data.db', "admins", "aid")
+
+    if message.from_user.id not in admin_ids:
+        await message.answer('You do not have permission to use this command')
+    else:
+        deliver = True
+        await message.answer('Delivery service is now enabled')
+
+@dp.message_handler(commands=['deliver_off'])
+async def deliver_off(message: types.Message):
+    global deliver
+    admin_ids = admin_check('data.db', "admins", "aid")
+    
+    if not deliver:
+        await message.answer("Delivery service is already disabled")
+    elif message.from_user.id not in admin_ids:
+        await message.answer('You do not have permission to use this command')
+    else:
+        deliver = False
+        await message.answer('Delivery service is now disabled')
+
+
+
+@dp.message_handler(state=Form.deliver_log)
+async def check_del_pass(message: types.Message, state: FSMContext):
+    password = message.text
+    del_id = message.from_user.id
+    conn = sqlite3.connect('data.db')
+    cursor = conn.cursor()
+
+    pasword = "SELECT deliver_pass, deliver_name FROM deliverables WHERE deliver_id = ?"
+
+    cursor.execute(pasword, (del_id,))
+
+    row = cursor.fetchall()
+
+
+    for i in row:
+        if password == i[0]:
+            await message.answer(f"Welcome {i[1]}!")
+
+            await state.finish()
+
+        else:
+            await message.answer("Incorrect password")
+
 
 
 
@@ -166,7 +244,7 @@ async def handle_contact(message: types.Message):
     conn = sqlite3.connect('data.db')
     cursor = conn.cursor()
 
-    add_delivry_data = "INSERT INTO deliverables (user_id, deliver_name, deliver_car, deliver_number, deliver_pass, deliver_status) VALUES (?, ?, ?, ?, ?, ?)"
+    add_delivry_data = "INSERT INTO deliverables (deliver_id, deliver_name, deliver_car, deliver_number, deliver_pass, deliver_status) VALUES (?, ?, ?, ?, ?, ?)"
     values = (user_id, deliver_n, deliver_c, contact, deliver_p, "empty")
     cursor.execute(add_delivry_data, values)
 
@@ -215,8 +293,29 @@ async def admin_pass_check(message: types.Message, state: FSMContext):
 
 @dp.message_handler(lambda message: message.text == "Orders")
 async def admin_orders(message: types.Message, state: FSMContext):
-    await message.answer("Please choise catalog")
-    await Form.wait_order.set()
+    conn = sqlite3.connect("data.db")
+    cursor = conn.cursor()
+    query = "SELECT catalog_name FROM catalog"
+    cursor.execute(query)
+    rows = cursor.fetchall()  # Fetch all rows
+
+    # Close the database connection
+    conn.close()
+
+    if rows:
+        buttons = []
+        for row in rows:
+            buttons.append([KeyboardButton(text=row[0])])
+
+        # Add the "Return to top🔙" button after all the catalog buttons
+        buttons.append([KeyboardButton(text="Return to top🔙")])
+
+        # Create a ReplyKeyboardMarkup with the dynamic buttons
+        keyboard = ReplyKeyboardMarkup(resize_keyboard=True, keyboard=buttons)
+
+        # Send a message with the dynamic buttons
+        await message.answer("Please select a catalog:", reply_markup=keyboard)
+        await Form.wait_order.set()
 
 
 @dp.message_handler(state=Form.wait_order)
@@ -260,7 +359,7 @@ async def catalog_order(message: types.Message, state: FSMContext):
 
             button = [[KeyboardButton(text="Return to top🔙")]]
             keyboard = ReplyKeyboardMarkup(resize_keyboard=True, keyboard=button)
-            await bot.send_message(user_id, f"Orders for {message.text} catalog", reply_markup=keyboard)
+        await bot.send_message(user_id, f"Orders for {message.text} catalog", reply_markup=keyboard)
                 
 
 
@@ -268,12 +367,100 @@ async def catalog_order(message: types.Message, state: FSMContext):
 
 
 
+from aiogram import types
+
 @dp.message_handler(lambda message: message.text == "Statistics📊")
 async def statistic(message: types.Message):
     button = [[KeyboardButton(text="Return to top🔙")]]
     keyboard = ReplyKeyboardMarkup(resize_keyboard=True, keyboard=button)
 
-    await message.answer("It works", reply_markup=keyboard)
+    if not os.path.exists('plots'):
+        os.makedirs('plots')
+
+    conn = sqlite3.connect('data.db')
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT order_name, order_status FROM orders")
+    rows = cursor.fetchall()
+
+    # Dictionary to store products by catalog for both paid and unpaid orders
+    products_by_catalog_paid = {}
+    products_by_catalog_unpaid = {}
+    product_count_paid = 0
+    product_count_unpaid = 0
+
+    for row in rows:
+        cursor.execute("SELECT product_catalog, product_name FROM products WHERE product_name = ?", (row[0],))
+        products = cursor.fetchall()
+        for product in products:
+            catalog = product[0]
+            product_name = product[1]
+            if row[1] == "Paid":
+                if catalog not in products_by_catalog_paid:
+                    products_by_catalog_paid[catalog] = []
+                products_by_catalog_paid[catalog].append(product_name)
+                product_count_paid += 1
+            elif row[1] == "Unpaid":
+                if catalog not in products_by_catalog_unpaid:
+                    products_by_catalog_unpaid[catalog] = []
+                products_by_catalog_unpaid[catalog].append(product_name)
+                product_count_unpaid += 1
+
+    # Calculate percentages for paid products
+    percentages_paid = [(len(products) / product_count_paid) * 100 for products in products_by_catalog_paid.values()]
+    labels_paid = list(products_by_catalog_paid.keys())
+
+    # Calculate percentages for unpaid products
+    percentages_unpaid = [(len(products) / product_count_unpaid) * 100 for products in products_by_catalog_unpaid.values()]
+    labels_unpaid = list(products_by_catalog_unpaid.keys())
+
+    # Sending the message indicating the number of phones sold from each catalog for paid products
+    paid_message = "Number of phones sold from each catalog for paid products:\n"
+    for catalog, phones_sold in products_by_catalog_paid.items():
+        paid_message += f"- {catalog}: {len(phones_sold)} phones\n"
+
+    await message.answer(paid_message)
+
+    # Plotting for paid products
+    plt.figure(figsize=(12, 6))
+    plt.pie(percentages_paid, labels=labels_paid, autopct='%1.1f%%', startangle=140)
+    plt.title('Percentage of Paid Products by Catalog')
+    plt.axis('equal')  # Equal aspect ratio ensures that pie is drawn as a circle.
+
+    # Save the plot to the plots directory
+    plt.savefig('plots/paid.png')
+
+    # Sending the paid plot as a photo with caption
+    with open('plots/paid.png', 'rb') as photo:
+        await message.reply_photo(photo, caption="Percentage of Paid Products by Catalog")
+
+    # Sending the message indicating the number of phones sold from each catalog for unpaid products
+    unpaid_message = "Number of phones sold from each catalog for unpaid products:\n"
+    for catalog, phones_sold in products_by_catalog_unpaid.items():
+        unpaid_message += f"- {catalog}: {len(phones_sold)} phones\n"
+
+    await message.answer(unpaid_message)
+
+    # Plotting for unpaid products
+    plt.figure(figsize=(12, 6))
+    plt.pie(percentages_unpaid, labels=labels_unpaid, autopct='%1.1f%%', startangle=140)
+    plt.title('Percentage of Unpaid Products by Catalog')
+    plt.axis('equal')  # Equal aspect ratio ensures that pie is drawn as a circle.
+
+    # Save the plot to the plots directory
+    plt.savefig('plots/unpaid.png')
+
+    # Sending the unpaid plot as a photo with caption
+    with open('plots/unpaid.png', 'rb') as photo:
+        await message.reply_photo(photo, caption="Percentage of Unpaid Products by Catalog")
+
+
+
+
+
+
+        
+
 
 @dp.message_handler(lambda message: message.text == "Return to top🔙", state="*")
 async def back(message: types.Message, state:FSMContext):
@@ -304,7 +491,7 @@ async def back(message: types.Message, state:FSMContext):
         else:
                 buttons = [[KeyboardButton(text="Catalog📔"), KeyboardButton(text="My Wallet💰"), KeyboardButton(text="Basket 🛒"), KeyboardButton(text="Order history📋")]]
                 keyboard = ReplyKeyboardMarkup(resize_keyboard=True, keyboard=buttons)
-                await message.answer('You are back to the beginning')
+                await message.answer('You are back to the beginning', reply_markup=keyboard)
 
 
     
@@ -536,9 +723,12 @@ async def reg_pass(message: types.Message, state: FSMContext):
         cursor = conn.cursor()
 
         query = "INSERT INTO users (uid, username, password) VALUES (?, ?, ?)"
+        open_wallet = "INSERT INTO wallet (user_id,how_much) VALUES (?, ?)"
+        wallet_value = (user_id, 0)
         values = (user_id, name, password)
 
         cursor.execute(query, values)
+        cursor.execute(open_wallet, wallet_value)
 
         conn.commit()
         conn.close()
@@ -615,17 +805,20 @@ async def basket(message: types.Message, state: FSMContext):
     
     conn = sqlite3.connect("data.db")
     cursor = conn.cursor()
-    query = "SELECT order_name, order_price FROM orders WHERE user_id = ? AND order_status = ?"
+    query = "SELECT order_id, order_name, order_price FROM orders WHERE user_id = ? AND order_status = ?"
     cursor.execute(query, (user_id, "Unpaid",))
     row = cursor.fetchall()  # Fetch only one row as we filter by user ID
 
 
     for rows in row:
+        global product_name
+        print(rows)
+        product_name = rows[1]
         if rows:
             caption = f'''
-                Name: {rows[0]}\n\nPrice: {rows[1]}
+                Name: {rows[1]}\n\nPrice: {rows[2]}
             '''
-            img_name = f"img/{rows[0]}.jpg"
+            img_name = f"img/{rows[1]}.jpg"
 
             with open(img_name, 'rb') as photo:
                             # Create inline keyboard
@@ -638,14 +831,14 @@ async def basket(message: types.Message, state: FSMContext):
                 back = ReplyKeyboardMarkup(resize_keyboard=True, keyboard=button)
 
                 sent_photo = await bot.send_photo(chat_id=user_id, photo=photo, caption=caption, reply_markup=keyboard)
-                await bot.send_message(user_id, "Select the product you want to buy", reply_markup=back)
+                
                 # Store the caption along with the message ID for later retrieval
                 await state.update_data({sent_photo.message_id: caption})
         else:
             button = [[KeyboardButton(text="Return to top🔙"), KeyboardButton(text="Catalog📔")]]
             keyboard = ReplyKeyboardMarkup(resize_keyboard=True, keyboard=button)
             await message.answer("You have not added anything to your basket yet! If you want to buy something, go to the Catalog", reply_markup=keyboard)
-  
+    await bot.send_message(user_id, "Select the product you want to buy", reply_markup=back)
 
 
 @dp.message_handler(lambda message: message.text == "Order history📋")
@@ -683,7 +876,8 @@ async def inline_button_pressed(callback_query: types.CallbackQuery):
 
 
     button_data = callback_query.data
-    name = button_data.replace("buy_", "")
+    global product_id
+    product_id = button_data.replace("buy_", "")
 
     conn = sqlite3.connect("data.db")
     cursor = conn.cursor()
@@ -694,12 +888,13 @@ async def inline_button_pressed(callback_query: types.CallbackQuery):
     # Define the SQL queries
     wallet_query = "SELECT how_much FROM wallet WHERE user_id = ?"
     price_query = "SELECT product_price FROM products WHERE product_name = ?"
+
     
     # Execute SQL queries and fetch results
     cursor.execute(wallet_query, (user_id,))
     wallet_row = cursor.fetchone()  # Assuming each user has a unique entry
     
-    cursor.execute(price_query, (name,))
+    cursor.execute(price_query, (product_name,))
     price_row = cursor.fetchone()
 
     
@@ -711,15 +906,34 @@ async def inline_button_pressed(callback_query: types.CallbackQuery):
         if wallet_amount == product_price or wallet_amount >= product_price:
             # Update wallet (reduce amount by product price) and inform the user
             new_wallet_amount = wallet_amount - product_price
-            update_query = "UPDATE wallet SET how_much = ? WHERE user_id = ?"
-            cursor.execute(update_query, (new_wallet_amount, user_id))
-            order_archiving = "UPDATE orders SET order_status = ? WHERE user_id = ? AND order_name = ?"
-            cursor.execute(order_archiving, ("Paid", user_id, name,))
-            conn.commit()
-            button = [[KeyboardButton(text="Delivery🛫"), KeyboardButton(text="Take away🫴")]]
-            keyboard = ReplyKeyboardMarkup(resize_keyboard=True, keyboard=button)
             
-            await bot.send_message(user_id, 'How do you want to receive your order?', reply_markup=keyboard)  
+            update_query = "UPDATE wallet SET how_much = ? WHERE user_id = ?"
+            
+            cursor.execute(update_query, (new_wallet_amount, user_id))
+            
+            order_archiving = "UPDATE orders SET order_status = ? WHERE user_id = ? AND order_id = ?"
+
+            order_id = "SELECT order_id FROM orders WHERE order_id = ?"
+            cursor.execute(order_id, (product_id,))
+            row = cursor.fetchall()
+
+            for i in row:
+                cursor.execute(order_archiving, ("Paid", user_id, i[0],))
+            
+            conn.commit()
+
+            
+            
+            if deliver == True:
+                button = [[KeyboardButton(text="Delivery🛫"), KeyboardButton(text="Take away🫴")]]
+            
+                keyboard = ReplyKeyboardMarkup(resize_keyboard=True, keyboard=button)
+                
+                await bot.send_message(user_id, 'How do you want to receive your order?', reply_markup=keyboard) 
+            else:
+                cursor.execute("")
+                await bot.send_message(user_id, "You can pick up your order")
+
         else:
             await bot.send_message(user_id, 'Insufficient funds')  
     else:
@@ -733,32 +947,169 @@ async def inline_button_pressed(callback_query: types.CallbackQuery):
 
 @dp.message_handler(lambda message: message.text == "Delivery🛫")
 async def delivery(message: types.Message, state: FSMContext):
+
+
+
+
+
+        keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
+        button = KeyboardButton("Share Location", request_location=True)
+        keyboard.add(button)
+        
+        await message.answer("Please share your location", reply_markup=keyboard)
+
+# Close the database connection when done
+
+@dp.message_handler(content_types=types.ContentType.LOCATION)
+async def handle_location(message: types.Message, state: FSMContext):
+    user_id = message.from_user.id
+    location = message.location
+
+    # Connect to the database
     conn = sqlite3.connect('data.db')
     cursor = conn.cursor()
+
+    # Retrieve available deliveries
+    cursor.execute("SELECT deliver_name, deliver_car, deliver_number, deliver_id FROM deliverables WHERE deliver_status = 'empty'")
+    available_deliveries = cursor.fetchall()
     
-    delivers = []
-
-    deliver = "SELECT deliver_name, deliver_car, deliver_number, user_id FROM deliverables WHERE  deliver_status = ?"
-
-    cursor.execute(deliver, ("empty",))
-
-    deliver_row = cursor.fetchall()
-
-    for row in deliver_row:
-        delivers.append(row)
-
-    if delivers:
-        random_deliver = random.choice(delivers)
-        await message.answer(f"The supplier is on the way\n\nName: {random_deliver[0]}\n\nPhone Number: {random_deliver[2]}\n\nCar: {random_deliver[1]}")
-        update_status = "UPDATE deliverables SET deliver_status = ? WHERE deliver_name = ?"
-        cursor.execute(update_status, ("Busy", random_deliver[0],))
-        await bot.send_message(random_deliver[3], "Go to work")
-    else:
-        print("No available deliveries")
-
-    conn.close()  # Close the database connection when done
+    if available_deliveries:
+        longitude = message.location.longitude
+        latitute = message.location.latitude
+        global deliver_id
+        location = "INSERT INTO locations (user_id, deliver_id,order_id , longtude, latitute) VALUES (?, ?, ?, ?,?)"
 
         
+
+ 
+        random_deliver = random.choice(available_deliveries)
+        deliver_name, deliver_car, deliver_number, deliver_id = random_deliver
+
+        cursor.execute("UPDATE deliverables SET deliver_status = 'busy', order_id = ?, order_name = ?, status = 'started' WHERE deliver_id = ?", (product_id, product_name ,deliver_id,))
+        cursor.execute("UPDATE orders SET deliver_id = ?, order_status = 'Paid', delivry_status = 'deliver' WHERE user_id = ? AND order_id = ?", (deliver_id, user_id, product_id,))
+        cursor.execute(location, (user_id, deliver_id, product_id, longitude, latitute,))
+        conn.commit()
+
+        await message.answer(f"The supplier is on the way\n\nName: {deliver_name}\n\nPhone Number: {deliver_number}\n\nCar: {deliver_car}")
+
+        keyboard = ReplyKeyboardMarkup(resize_keyboard=True) 
+        button = KeyboardButton("I received the order")
+        keyboard.add(button)
+
+        await bot.send_message(deliver_id, f'You have a new order', reply_markup=keyboard)
+    else:
+        await message.answer("Sorry, all delivery agents are currently busy. Please wait for your turn.")
+        while True:
+                print('wait')
+                await asyncio.sleep(30)   
+                
+                # Add a delay to avoid constant querying
+                
+                conn = sqlite3.connect('data.db')
+                cursor = conn.cursor()
+
+                
+
+                print(f"Order_id {product_id}")
+
+                cursor.execute("SELECT status FROM deliverables")
+                delivery_status = cursor.fetchall()
+                print(delivery_status)
+                for i in delivery_status:
+                    print(f'I {i[0]}')
+
+
+                    if i and i[0] == 'finished':
+                        print('Finish')
+                        cursor.execute("SELECT delivry_status FROM orders WHERE order_id = ?", (product_id,))
+                        delivery_order_status = cursor.fetchone()
+
+                        if delivery_order_status and delivery_order_status[0] != 'delivery':
+                            cursor.execute("UPDATE orders SET delivry_status = ? WHERE order_id = ?", ("delivery", product_id))
+                            conn.commit()
+
+                            cursor.execute("SELECT deliver_id FROM deliverables")
+                            delivery_agent_id = cursor.fetchone()
+                            print(delivery_agent_id)
+
+                            if delivery_agent_id:
+                            
+                                button = [[KeyboardButton(text="I received the order")]]
+                                keyboard = ReplyKeyboardMarkup(resize_keyboard=True, keyboard=button)
+                                cursor.execute("UPDATE deliverables SET deliver_status = 'busy', order_id = ?, order_name = ?, status = 'started' WHERE deliver_id = ?", (product_id, product_name ,deliver_id,))
+                                conn.commit()
+                                await bot.send_message(delivery_agent_id[0], 'You have a new order', reply_markup=keyboard)
+
+                                cursor.execute("SELECT deliver_id FROM deliverables WHERE order_id = ?", (product_id,))
+
+                                rowss = cursor.fetchall()
+
+                                for h in rowss:
+
+                                
+                                    cursor.execute("SELECT deliver_name, deliver_number, deliver_car, order_id FROM deliverables WHERE deliver_id = ?", (h[0],))
+                                    row = cursor.fetchall()
+                                    for i in row:
+                                        cursor.execute("SELECT user_id FROM orders WHERE order_id = ?", (i[3],))
+                                        rows = cursor.fetchall()
+
+                                        for j in rows:
+                                            await bot.send_message(j[0], f"The supplier is on the way\n\nName: {i[0]}\n\nPhone Number: {i[1]}\n\nCar: {i[2]}")
+                break
+
+
+    conn.close()
+
+    
+
+                                    
+                   
+
+
+
+@dp.message_handler(lambda message: message.text == "I received the order")
+async def deliver_order_received(message: types.Message, state: FSMContext):
+    print('Hello')
+    deliver_ = message.from_user.id
+    conn = sqlite3.connect('data.db')
+    cursor = conn.cursor()
+    keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
+    button = KeyboardButton("I handed it over to the customer")
+    keyboard.add(button)
+
+    deliver_id = "SELECT deliver_id FROM deliverables WHERE deliver_id = ?"
+
+
+    cursor.execute(deliver_id, (deliver_,))
+    row = cursor.fetchall()
+
+    for i in row:
+        print(i)
+        cursor.execute("SELECT longtude, latitute FROM locations WHERE deliver_id = ?", (i[0],))
+        location = cursor.fetchall()
+        print(location)
+        for j in location:
+            print(j[1], j[0])
+
+
+            await message.answer('The address you need to deliver to', reply_markup=keyboard)
+            # Replace location.latitude and location.longitude with actual latitude and longitude values
+            await bot.send_location(i[0], latitude=j[1], longitude=j[0])
+        conn.close()
+
+@dp.message_handler(lambda message: message.text == "I handed it over to the customer")
+async def finish_order(message: types.Message, state: FSMContext):
+    del_id = message.from_user.id
+
+    conn = sqlite3.connect('data.db')
+
+    cursor = conn.cursor()
+
+    update_status_del = "UPDATE deliverables SET deliver_status = ?, status = ? WHERE deliver_id = ?"
+    cursor.execute(update_status_del, ("empty", "finished", del_id))
+    conn.commit()
+    await message.answer("Ok wait for next")
+
 
 @dp.message_handler(lambda message: message.text == "Take away🫴")
 async def take_away(message: types.Message, state: FSMContext):
@@ -852,12 +1203,15 @@ async def inline_button_pressed(callback_query: types.CallbackQuery):
         query = "SELECT product_name, product_description, product_price FROM products WHERE product_catalog = ? AND product_name = ?"
         cursor.execute(query, (catalog, name))
         rows = cursor.fetchall()
+        # Generate 5 unique random 6-digit numbers
+        random_number = generate_unique_numbers(1)
+        print(random_number)
 
         for row in rows:
 
             # Define the SQL query with a WHERE clause to filter rows by product_catalog and product_name
-            query = "INSERT INTO orders (user_id, order_name, order_description, order_price, order_status) VALUES (?, ?, ?, ?, ?)"
-            values = (user_id, row[0], row[1], row[2], "Unpaid")
+            query = "INSERT INTO orders (user_id, order_name, order_description, order_price, order_id, order_status) VALUES (?, ?, ?, ?, ?, ?)"
+            values = (user_id, row[0], row[1], row[2],random_number[0], "Unpaid")
             cursor.execute(query, values)
             conn.commit()
             conn.close()
